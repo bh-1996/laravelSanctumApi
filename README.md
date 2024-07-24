@@ -96,8 +96,8 @@ This project demonstrates a Laravel-based API secured with Laravel Sanctum for a
 
 **Testing**
 - To run tests, use the following command:
-```bash
-   php artisan test
+    ```bash
+    php artisan test
 
 ## Contributing
 - Feel free to open issues or submit pull requests. Any contributions are welcome!
