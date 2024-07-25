@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\MediaHelper;
 use App\Http\Controllers\Controller;
 use App\Models\Post;
 use Carbon\Exceptions\Exception;
@@ -10,27 +11,32 @@ use Illuminate\Support\Facades\Validator;
 
 class PostController extends Controller
 {
+    private $imageUpload;
+
+    /**
+     * Construct method
+     */
+
+     public function __construct(MediaHelper $imageUpload)
+     {
+        $this->imageUpload = $imageUpload;
+     }
     /**
      * Display a listing of the resource.
      */
     public function index()
     {
         try{
+            $data['posts'] = Post::all();
+            if (!$data) {
+                return $this->imageUpload->sendErrorResponse('Post not found', 404);
+            }
+            // Return successful response
+            return  $this->imageUpload->sendSuccessResponse($data, 'All post fetched.');
 
-        $data['posts'] = Post::all();
-
-        // Return successful response
-        return response()->json([
-            'status' => true,
-            'message' => 'All post data !',
-            'post' => $data
-        ], 200);
-    } catch (Exception $e) {
-        return response()->json([
-            'message' => 'Failed to retrieve posts',
-            'error' => $e->getMessage()
-        ], 500);
-    }
+        } catch (Exception $e) {
+            return  $this->imageUpload->sendErrorResponse('Failed to create posts', ['error' => $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -49,32 +55,13 @@ class PostController extends Controller
             ]);
             // Check if validation fails
             if ($validatorPost->fails()) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validatorPost->errors()->all(),
-                ], 401);
+                return  $this->imageUpload->sendErrorResponse('Validation failed', ['error' =>  $validatorPost->errors()->all()], 401);
             }
 
             $imagePath = null;
-
             if ($request->hasFile('image')) {
-                // Handle the image upload
                 $image = $request->file('image');
-                $extension = $image->getClientOriginalExtension(); // Get file extension
-                // Generate a unique name for the image
-                $uniqueName = time() . '-' . uniqid() . '.' . $extension;
-                // Define the directory path
-                $directoryPath = public_path('images');
-
-                // Check if the directory exists, and create it if it does not
-                if (!is_dir($directoryPath)) {
-                    mkdir($directoryPath, 0755, true);
-                }
-                // Move the file to the 'public/images' directory
-                $image->move($directoryPath, $uniqueName);
-                // Store image path relative to public path
-                $imagePath = $uniqueName;
+                $imagePath = $this->imageUpload->uploadImage($image);
             }
 
             $post = Post::create([
@@ -84,16 +71,13 @@ class PostController extends Controller
             ]);
 
             // Return successful response
-            return response()->json([
-                'status' => true,
-                'message' => 'Post created successfully',
+            $data = [
+                'image_url' => asset('images/'.$imagePath),
                 'post' => $post
-            ], 200);
+            ];
+            return  $this->imageUpload->sendSuccessResponse($data, 'Post created successfully.');
         } catch (Exception $e) {
-            return response()->json([
-                'message' => 'Failed to retrieve posts',
-                'error' => $e->getMessage()
-            ], 500);
+            return  $this->imageUpload->sendErrorResponse('Failed to create posts', ['error' => $e->getMessage()], 500);
         }
     }
 
@@ -105,14 +89,10 @@ class PostController extends Controller
         $post = Post::find($id);
 
         if (!$post) {
-            return response()->json(['message' => 'Post not found'], 404);
+            return $this->imageUpload->sendErrorResponse('Post not found', 404);
         }
         // Return successful response
-        return response()->json([
-            'status' => true,
-            'message' => 'Post fetched successfully',
-            'post' => $post
-        ], 200);
+        return  $this->imageUpload->sendSuccessResponse($post, 'Post fetched successfully.');
     }
 
     /**
@@ -120,67 +100,51 @@ class PostController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        $post = Post::findOrFail($id);
+        try {
 
-        if (!$post) {
-            return response()->json([
-                'status'=>false,
-                'message' => 'Post not found !'
-            ], 404);
-        }
+            $post = Post::findOrFail($id);
 
-        $validatorPost = Validator::make(
-            $request->all(),
-            [
-            'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'image' => 'required|image|mimes:png,jpg,jpeg,gif',
-        ]);
-        // Check if validation fails
-        if ($validatorPost->fails()) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Validation failed',
-                'errors' => $validatorPost->errors()->all(),
-            ], 401);
-        }
-
-        $imagePath = $post->image;
-        if ($request->hasFile('image')) {
-            $path = public_path() . '/images/';
-            // Delete the old image if it exists and is within the 'images' directory
-            if ($post->image && $post->image != null) {
-                $old_image = $path . $post->image;
-                if(file_exists($old_image)){
-                    unlink($old_image);
-                }
+            if (!$post) {
+                return $this->imageUpload->sendErrorResponse('Post not found', 404);
             }
 
-            // Handle the image upload
-            $image = $request->file('image');
-            $extension = $image->getClientOriginalExtension(); // Get file extension
-            // Generate a unique name for the image
-            $uniqueName = time() . '-' . uniqid() . '.' . $extension;
-            // Define the directory path
-            $directoryPath = public_path('images');
-            // Move the file to the 'public/images' directory
-            $image->move($directoryPath, $uniqueName);
-            // Store image path relative to public path
-            $imagePath = $uniqueName;
+            $validatorPost = Validator::make(
+                $request->all(),
+                [
+                'title' => 'required|string|max:255',
+                'description' => 'required|string',
+                'image' => 'required|image|mimes:png,jpg,jpeg,gif',
+            ]);
+            // Check if validation fails
+            if ($validatorPost->fails()) {
+                return  $this->imageUpload->sendErrorResponse('Validation failed', ['error' =>  $validatorPost->errors()->all()], 401);
+            }
+
+            $imagePath = $post->image;
+            if ($request->hasFile('image')) {
+                $path = public_path() . '/images/';
+                // Delete the old image if it exists and is within the 'images' directory
+                if ($post->image && $post->image != null) {
+                    $old_image = $path . $post->image;
+                    if(file_exists($old_image)){
+                        unlink($old_image);
+                    }
+                }
+                //Upload image and return name of image
+                $image = $request->file('image');
+                $imagePath = $this->imageUpload->uploadImage($image);
+            }
+
+            // Update the post
+            $post->update([
+                'title' => $request->title,
+                'description' => $request->description,
+                'image' => $imagePath,
+            ]);
+            return  $this->imageUpload->sendSuccessResponse($post, 'Post updated successfully.');
+        } catch (Exception $e) {
+            return  $this->imageUpload->sendErrorResponse('Failed to update posts', ['error' => $e->getMessage()], 500);
         }
-
-        // Update the post
-        $post->update([
-            'title' => $request->title,
-            'description' => $request->description,
-            'image' => $imagePath,
-        ]);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Post updated successfully',
-            'post' => $post
-        ], 200);
     }
 
     /**
@@ -188,26 +152,29 @@ class PostController extends Controller
      */
     public function destroy(string $id)
     {
-        $post = Post::find($id);
+        try{
+            $post = Post::find($id);
 
-        if (!$post) {
-            return response()->json(['message' => 'Post not found'], 404);
-        }
+            if (!$post) {
+                return $this->imageUpload->sendErrorResponse('Post not found', 404);
+            }
 
-        // Delete the image file if it exists
-        if ($post->image) {
-            $path = public_path() . '/images/';
-            // Delete the old image if it exists and is within the 'images' directory
-            if ($post->image && $post->image != null) {
-                $old_image = $path . $post->image;
-                if(file_exists($old_image)){
-                    unlink($old_image);
+            // Delete the image file if it exists
+            if ($post->image) {
+                $path = public_path() . '/images/';
+                // Delete the old image if it exists and is within the 'images' directory
+                if ($post->image && $post->image != null) {
+                    $old_image = $path . $post->image;
+                    if(file_exists($old_image)){
+                        unlink($old_image);
+                    }
                 }
             }
+
+            $post->delete();
+            return  $this->imageUpload->sendSuccessResponse($post, 'Post deleted successfully.');
+        } catch (Exception $e) {
+            return  $this->imageUpload->sendErrorResponse('Failed to create posts', ['error' => $e->getMessage()], 500);
         }
-
-        $post->delete();
-
-        return response()->json(['message' => 'Post deleted successfully']);
     }
 }
